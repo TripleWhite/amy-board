@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amy Board - 任务看板</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app" class="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-900 to-blue-900">
+    <!-- 登录页面 -->
+    <div v-if="!isAuthenticated" class="flex items-center justify-center min-h-screen">
+      <div class="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl w-96">
+        <h1 class="text-3xl font-bold text-white text-center mb-6">🔐 Amy Board</h1>
+        <p class="text-white/60 text-center mb-6">左右与 Amy 的任务协同看板</p>
+        <input
+          type="password"
+          v-model="loginPassword"
+          @keyup.enter="login"
+          placeholder="输入密码"
+          class="w-full px-4 py-3 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+        >
+        <button
+          @click="login"
+          class="w-full mt-4 px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-medium transition-all"
+        >
+          登录
+        </button>
+        <p v-if="loginError" class="text-red-400 text-center mt-4">{{ loginError }}</p>
+      </div>
+    </div>
+
+    <!-- 主界面 -->
+    <div v-else class="p-6">
+      <!-- 顶部导航 -->
+      <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-4">
+          <h1 class="text-3xl font-bold text-white">📋 Amy Board</h1>
+          <span class="px-3 py-1 bg-green-500/20 text-green-300 rounded-full text-sm">在线</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <button @click="showCreateModal = true" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-medium transition-all">
+            + 新建任务
+          </button>
+          <button @click="logout" class="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-medium transition-all">
+            退出
+          </button>
+        </div>
+      </div>
+
+      <!-- 看板列 -->
+      <div class="grid grid-cols-4 gap-6">
+        <div
+          v-for="column in columns"
+          :key="column.status"
+          class="bg-white/5 backdrop-blur-sm rounded-xl p-4 min-h-[calc(100vh-200px)]"
+        >
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-white">{{ column.title }}</h2>
+            <span class="px-2 py-1 bg-white/10 text-white/60 rounded-lg text-sm">
+              {{ getTasksByStatus(column.status).length }}
+            </span>
+          </div>
+
+          <!-- 任务卡片 -->
+          <div class="space-y-3">
+            <div
+              v-for="task in getTasksByStatus(column.status)"
+              :key="task.id"
+              @click="openTaskDetail(task)"
+              class="bg-white/10 hover:bg-white/20 rounded-lg p-4 cursor-pointer transition-all group"
+            >
+              <div class="flex items-start justify-between mb-2">
+                <span :class="getPriorityClass(task.priority)" class="text-xs px-2 py-0.5 rounded">
+                  {{ getPriorityText(task.priority) }}
+                </span>
+                <!-- 启动按钮（待指派任务） -->
+                <button
+                  v-if="task.status === 'todo'"
+                  @click.stop="startTask(task.id)"
+                  class="bg-green-500/20 text-green-400 hover:bg-green-500/30 px-3 py-1 rounded-lg text-sm transition-colors"
+                >
+                  🚀 启动
+                </button>
+                <!-- 查看进展按钮（进行中任务） -->
+                <button
+                  v-if="task.status === 'doing'"
+                  @click.stop="viewProgress(task.id)"
+                  class="bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 px-3 py-1 rounded-lg text-sm transition-colors"
+                >
+                  📊 进展
+                </button>
+                <!-- 完成按钮（待确认任务） -->
+                <button
+                  v-if="task.status === 'review'"
+                  @click.stop="completeTask(task.id, true)"
+                  class="bg-green-500/20 text-green-400 hover:bg-green-500/30 px-3 py-1 rounded-lg text-sm transition-colors"
+                >
+                  ✅ 完成
+                </button>
+                <!-- 未完成按钮（待确认任务） -->
+                <button
+                  v-if="task.status === 'review'"
+                  @click.stop="completeTask(task.id, false)"
+                  class="bg-red-500/20 text-red-400 hover:bg-red-500/30 px-3 py-1 rounded-lg text-sm transition-colors ml-2"
+                >
+                  ❌ 未完成
+                </button>
+                <button
+                  @click.stop="deleteTask(task.id)"
+                  class="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
+                >
+                  ✕
+                </button>
+              </div>
+              <h3 class="text-white font-medium mb-1">{{ task.title }}</h3>
+              <p v-if="task.description" class="text-white/50 text-sm line-clamp-2 mb-2">{{ task.description }}</p>
+              <div class="flex items-center justify-between text-xs text-white/40">
+                <span>{{ task.assignee || '未指派' }}</span>
+                <span v-if="task.deadline">{{ formatDate(task.deadline) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新建任务弹窗 -->
+    <div v-if="showCreateModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+      <div class="bg-gray-900 rounded-2xl p-6 w-full max-w-md">
+        <h2 class="text-xl font-bold text-white mb-4">新建任务</h2>
+        <input
+          v-model="newTask.title"
+          placeholder="任务标题"
+          class="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white mb-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
+        >
+        <textarea
+          v-model="newTask.description"
+          placeholder="任务描述"
+          rows="3"
+          class="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white mb-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
+        ></textarea>
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <select
+            v-model="newTask.priority"
+            class="px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+            <option :value="0" class="bg-gray-800">🔴 P0 紧急</option>
+            <option :value="1" class="bg-gray-800">🟡 P1 高</option>
+            <option :value="2" class="bg-gray-800">🟢 P2 普通</option>
+          </select>
+          <input
+            type="date"
+            v-model="newTask.deadline"
+            class="px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+        </div>
+        <select
+          v-model="newTask.assignee"
+          class="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white mb-4 focus:outline-none focus:ring-2 focus:ring-purple-500"
+        >
+          <option value="" class="bg-gray-800">👤 选择指派人</option>
+          <option value="Amy" class="bg-gray-800">✨ Amy</option>
+          <option value="左右" class="bg-gray-800">👤 左右</option>
+        </select>
+        <div class="flex justify-end gap-3">
+          <button @click="showCreateModal = false" class="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all">
+            取消
+          </button>
+          <button @click="createTask" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-all">
+            创建
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 任务详情弹窗 -->
+    <div v-if="selectedTask" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+      <div class="bg-gray-900 rounded-2xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto">
+        <div class="flex items-start justify-between mb-4">
+          <h2 class="text-xl font-bold text-white">{{ selectedTask.title }}</h2>
+          <button @click="selectedTask = null" class="text-white/50 hover:text-white">✕</button>
+        </div>
+
+        <div :class="getPriorityClass(selectedTask.priority)" class="text-xs px-2 py-1 rounded mb-3 inline-block">
+          {{ getPriorityText(selectedTask.priority) }}
+        </div>
+
+        <p class="text-white/70 mb-4">{{ selectedTask.description || '无描述' }}</p>
+
+        <div class="grid grid-cols-2 gap-4 text-sm mb-4">
+          <div class="text-white/50">指派给: <span class="text-white">{{ selectedTask.assignee || '未指派' }}</span></div>
+          <div class="text-white/50">截止: <span class="text-white">{{ formatDate(selectedTask.deadline) }}</span></div>
+          <div class="text-white/50">创建人: <span class="text-white">{{ selectedTask.created_by }}</span></div>
+          <div class="text-white/50">创建时间: <span class="text-white">{{ formatDateTime(selectedTask.created_at) }}</span></div>
+        </div>
+
+        <!-- 状态变更 -->
+        <div class="mb-4">
+          <label class="text-white/50 text-sm block mb-2">状态</label>
+          <div class="flex gap-2">
+            <button
+              v-for="col in columns"
+              :key="col.status"
+              @click="updateStatus(selectedTask.id, col.status)"
+              :disabled="selectedTask.status === col.status"
+              :class="[
+                'px-3 py-1 rounded-lg text-sm transition-all',
+                selectedTask.status === col.status
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-white/10 hover:bg-white/20 text-white/70'
+              ]"
+            >
+              {{ col.title }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 评论区域 -->
+        <div class="border-t border-white/10 pt-4">
+          <h3 class="text-white font-medium mb-3">💬 评论</h3>
+          <div class="space-y-2 mb-3 max-h-40 overflow-y-auto">
+            <div v-for="comment in taskComments" :key="comment.id" class="bg-white/5 rounded-lg p-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-purple-300 text-sm">{{ comment.author }}</span>
+                <span class="text-white/40 text-xs">{{ formatDateTime(comment.created_at) }}</span>
+              </div>
+              <p class="text-white/80 text-sm">{{ comment.content }}</p>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <input
+              v-model="newComment"
+              @keyup.enter="addComment"
+              placeholder="添加评论..."
+              class="flex-1 px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+            <button @click="addComment" class="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm transition-all">
+              发送
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 实时更新通知 -->
+    <div class="fixed bottom-4 right-4 space-y-2">
+      <TransitionGroup name="toast">
+        <div
+          v-for="notification in notifications"
+          :key="notification.id"
+          :class="[
+            'px-4 py-3 rounded-lg shadow-lg backdrop-blur-sm',
+            notification.type === 'success' ? 'bg-green-600/90 text-white' : 'bg-purple-600/90 text-white'
+          ]"
+        >
+          {{ notification.message }}
+        </div>
+      </TransitionGroup>
+    </div>
+  </div>
+
+  <script src="app.js?v=20260201"></script>
+</body>
+</html>
